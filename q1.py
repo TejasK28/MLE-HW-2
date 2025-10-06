@@ -30,7 +30,7 @@ print("phi^T * phi:\n", product)
 det = np.linalg.det(product)
 print("Determinant of Φᵗ Φ:", det,"\n===============")
 
-if(det <= 0.0):
+if(abs(det) < 1e-10):
     print("Determinant is 0, so the data matrix is NOT invertible\n===============")
 else:
     print("The data matrix is invertible")
