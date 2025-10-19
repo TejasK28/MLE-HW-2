@@ -1,87 +1,66 @@
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
-# TODO: Implement MMSE regression with 5-fold cross validation
-# Using polynomial features up to degree 9
-# Need to report average validation error across all folds
+print("Loading datasets...")
+train_data_small = np.load("train.npz")
+train_x = train_data_small["x"]
+train_y = train_data_small["y"]
 
-# Load training data
-data = np.load("train.npz")
-x_data = data["x"]  # input features
-y_data = data["y"]  # target outputs (looks like noisy sine wave from the comment)
+test_data = np.load("test.npz")
+test_x = test_data["x"]
+test_y = test_data["y"]
 
-# Setup for cross validation
-num_samples = len(x_data)
-num_folds = 5
-samples_per_fold = num_samples // num_folds  # might leave some samples out if not divisible
-poly_degree = 9  # using 9th degree polynomial
+train_data_large = np.load("train_100.npz")
+train_x_100 = train_data_large["x"]
+train_y_100 = train_data_large["y"]
 
-# Randomize the data order
-np.random.seed(42)  # for reproducibility
-shuffled_indices = np.random.permutation(num_samples)
+def create_polynomial_features(X, degree=9):
+    return np.array([[x**i for i in range(degree + 1)] for x in X])
 
-# Store MSE for each fold
-validation_errors = []
+def compute_ols_weights(X, y):
+    return np.linalg.pinv(X.T @ X) @ X.T @ y
 
-print("Starting 5-fold cross validation...")
+def make_predictions(X, weights):
+    return X @ weights
 
-for current_fold in range(num_folds):
-    print(f"Processing fold {current_fold + 1}/{num_folds}")
-    
-    # Figure out validation set indices for this fold
-    start_idx = current_fold * samples_per_fold
-    if current_fold == num_folds - 1:  # last fold gets any remaining samples
-        end_idx = num_samples
-    else:
-        end_idx = (current_fold + 1) * samples_per_fold
-    
-    validation_indices = shuffled_indices[start_idx:end_idx]
-    
-    # Training set is everything else
-    train_indices = np.concatenate([
-        shuffled_indices[:start_idx], 
-        shuffled_indices[end_idx:]
-    ])
-    
-    # Extract actual data points
-    x_train = x_data[train_indices]
-    y_train = y_data[train_indices]
-    x_val = x_data[validation_indices]
-    y_val = y_data[validation_indices]
-    
-    # Build polynomial feature matrix: [1, x, x^2, x^3, ..., x^9]
-    # For training data
-    train_features = []
-    for power in range(poly_degree + 1):
-        train_features.append(x_train ** power)
-    Phi_train = np.column_stack(train_features)
-    
-    # For validation data
-    val_features = []
-    for power in range(poly_degree + 1):
-        val_features.append(x_val ** power)
-    Phi_val = np.column_stack(val_features)
-    
-    # Solve normal equations: w = (Phi^T * Phi)^(-1) * Phi^T * y
-    # This is the MMSE solution
-    gram_matrix = Phi_train.T @ Phi_train
-    rhs = Phi_train.T @ y_train
-    weights = np.linalg.solve(gram_matrix, rhs)
-    
-    # Make predictions on validation set
-    predictions = Phi_val @ weights
-    
-    # Calculate mean squared error
-    squared_errors = (y_val - predictions) ** 2
-    fold_mse = np.mean(squared_errors)
-    validation_errors.append(fold_mse)
-    
-    print(f"Fold {current_fold + 1} MSE: {fold_mse:.6f}")
+def calculate_mse(pred, true):
+    return np.mean((pred - true)**2)
 
-# Calculate final result
-average_validation_mse = np.mean(validation_errors)
-print(f"\n=== RESULTS ===")
-print(f"Average validation MSE across {num_folds} folds: {average_validation_mse:.6f}")
+def generate_kfold_splits(n, k=5, seed=123):
+    rng = np.random.default_rng(seed)
+    indices = np.arange(n)
+    rng.shuffle(indices)
+    folds = np.array_split(indices, k)
+    
+    splits = []
+    for i in range(k):
+        val_idx = folds[i]
+        train_idx = np.hstack(folds[:i] + folds[i+1:])
+        splits.append((train_idx, val_idx))
+    return splits
 
-# Might be useful to see the variance too
-mse_std = np.std(validation_errors)
-print(f"Standard deviation of MSE: {mse_std:.6f}")
+def perform_ols_cv(X, y, splits):
+    mse_scores = []
+    weights_list = []
+    
+    for train_idx, val_idx in splits:
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_val, y_val = X[val_idx], y[val_idx]
+        
+        train_features = create_polynomial_features(X_train)
+        weights = compute_ols_weights(train_features, y_train)
+        
+        val_features = create_polynomial_features(X_val)
+        predictions = make_predictions(val_features, weights)
+        
+        mse_scores.append(calculate_mse(predictions, y_val))
+        weights_list.append(weights)
+    
+    return np.mean(mse_scores), np.mean(weights_list, axis=0)
+
+cv_splits = generate_kfold_splits(len(train_x))
+ols_avg_mse, ols_weights = perform_ols_cv(train_x, train_y, cv_splits)
+
+print(f"OLS Average MSE: {ols_avg_mse:.6f}")
+print(f"Features: {len(ols_weights)}")
